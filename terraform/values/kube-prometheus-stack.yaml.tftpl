@@ -29,6 +29,15 @@ grafana:
     nodePort: ${grafana_node_port}
   # Mot de passe admin injecté par Terraform (set_sensitive).
   defaultDashboardsTimezone: Europe/Paris
+  # Renderer d'images (export PNG des dashboards via l'endpoint /render).
+  imageRenderer:
+    enabled: true
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 384Mi
   sidecar:
     dashboards:
       enabled: true

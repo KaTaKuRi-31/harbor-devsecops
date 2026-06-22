@@ -1,5 +1,7 @@
 # Harbor + Terraform + Pipeline CI sécurisée (DevSecOps)
 
+[![CI DevSecOps — Harbor](https://github.com/KaTaKuRi-31/harbor-devsecops/actions/workflows/ci.yml/badge.svg)](https://github.com/KaTaKuRi-31/harbor-devsecops/actions/workflows/ci.yml)
+
 Déploiement de **Harbor** (registre d'images conteneur) sur **k3s** (via **k3d**)
 à l'aide de **Terraform** (provider Helm), avec une **pipeline GitHub Actions
 bloquante** couvrant l'ensemble de la chaîne DevSecOps, et l'**observabilité**
@@ -87,6 +89,16 @@ récupéré par Prometheus. Le dashboard Grafana (« Harbor — Registre & CVE �
 provisionné automatiquement, présente l'état du registre (projets, dépôts,
 quotas, trafic HTTP) et les vulnérabilités détectées par le scanner Trivy de
 Harbor.
+
+## Preuves (docs/captures)
+
+- `docs/captures/grafana-cve-dashboard.png` — dashboard Grafana « Harbor —
+  Registre & CVE » avec données réelles (CVE par sévérité, registre, trafic).
+- `docs/captures/github-actions-run.png` — exécution GitHub Actions au statut
+  **Success** (pipeline bloquante).
+- `docs/captures/cosign-verify.txt` — vérification de la signature Cosign de
+  l'image publiée (identité = workflow GitHub, journal de transparence Rekor).
+- `docs/architecture.png` — schéma d'architecture. `docs/ORAL.md` — guide d'oral.
 
 ## Arborescence
 

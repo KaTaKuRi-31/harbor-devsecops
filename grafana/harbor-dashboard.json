@@ -157,11 +157,11 @@
     },
     {
       "type": "timeseries",
-      "title": "Latence p95 de l'API Harbor",
+      "title": "Latence moyenne de l'API Harbor",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 19 },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(harbor_core_http_request_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "p95" }
+        { "refId": "A", "expr": "sum(rate(harbor_core_http_request_duration_seconds_sum[$__rate_interval])) / sum(rate(harbor_core_http_request_duration_seconds_count[$__rate_interval]))", "legendFormat": "latence moyenne" }
       ],
       "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 15 } } }
     }
