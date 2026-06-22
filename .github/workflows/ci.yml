@@ -1,0 +1,178 @@
+name: CI DevSecOps — Harbor
+
+# Pipeline sécurisée bloquante : lint (hadolint, tflint, checkov) → SAST (Semgrep)
+# → build → CVE (Trivy, bloquant) → DAST (ZAP baseline) → signature (Cosign keyless)
+# → publication. Les contrôles tournent sur des runners GitHub hébergés ;
+# la publication vers le Harbor interne tourne sur un runner self-hosted.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write       # push vers GHCR
+  id-token: write       # signature keyless Cosign (OIDC)
+  security-events: write
+
+env:
+  GHCR_IMAGE: ghcr.io/${{ github.repository }}/harbor-demo-app
+
+jobs:
+  # ----------------------------------------------------------------- #
+  # 1. LINT — hadolint (Dockerfile) + tflint + checkov (IaC Terraform) #
+  # ----------------------------------------------------------------- #
+  lint:
+    name: Lint (hadolint + tflint + checkov)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Hadolint (Dockerfile)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: app/Dockerfile
+          failure-threshold: warning
+
+      - name: Setup tflint
+        uses: terraform-linters/setup-tflint@v4
+
+      - name: tflint (Terraform)
+        run: tflint --chdir=terraform --no-color
+
+      - name: Checkov (Terraform IaC)
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: terraform
+          framework: terraform
+          quiet: true
+          soft_fail: false        # BLOQUANT
+
+  # ------------------------------------- #
+  # 2. SAST — Semgrep (bloquant)          #
+  # ------------------------------------- #
+  sast:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      - name: Semgrep scan
+        run: semgrep --config p/default --config p/python --config p/flask --error --quiet app/
+
+  # ----------------------------------------------------------------------- #
+  # 3. BUILD + CVE (Trivy bloquant) + DAST (ZAP) + SIGN (Cosign) + push GHCR #
+  # ----------------------------------------------------------------------- #
+  build-scan-sign:
+    name: Build → Trivy → ZAP → Cosign → GHCR
+    needs: [lint, sast]
+    runs-on: ubuntu-latest
+    outputs:
+      image_ref: ${{ steps.meta.outputs.image_ref }}
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image en minuscules (contrainte GHCR)
+        id: meta
+        run: |
+          img="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')/harbor-demo-app"
+          echo "image=$img" >> "$GITHUB_OUTPUT"
+          echo "image_ref=$img:${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build + push (GHCR)
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: app
+          push: true
+          tags: ${{ steps.meta.outputs.image }}:${{ github.sha }},${{ steps.meta.outputs.image }}:latest
+          provenance: false
+
+      - name: CVE — Trivy (HIGH/CRITICAL, bloquant)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ steps.meta.outputs.image }}@${{ steps.push.outputs.digest }}
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          vuln-type: os,library
+          exit-code: '1'           # BLOQUANT
+
+      - name: DAST — démarrer l'application
+        run: docker run -d --name demo --network host ${{ steps.meta.outputs.image }}@${{ steps.push.outputs.digest }}
+
+      - name: DAST — ZAP baseline
+        run: |
+          mkdir -p zap && chmod 0777 zap
+          docker run --network host -v "$PWD/zap:/zap/wrk:rw" \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t http://127.0.0.1:8080 -r zap-report.html -w zap-report.md -I
+        # -I : ne pas échouer sur les alertes de niveau WARN (baseline = passif/informatif)
+
+      - name: DAST — publier le rapport ZAP
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-baseline-report
+          path: zap/
+
+      - name: Cosign — installation
+        uses: sigstore/cosign-installer@v3
+
+      - name: Cosign — signature keyless (OIDC)
+        run: cosign sign --yes ${{ steps.meta.outputs.image }}@${{ steps.push.outputs.digest }}
+
+      - name: Cosign — vérification de la signature
+        run: |
+          cosign verify ${{ steps.meta.outputs.image }}@${{ steps.push.outputs.digest }} \
+            --certificate-identity-regexp "https://github.com/${{ github.repository }}/.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+
+  # --------------------------------------------------------------------- #
+  # 4. PUSH HARBOR — runner self-hosted (réseau interne, registre privé)   #
+  #    Tire l'image signée depuis GHCR, la pousse dans Harbor, déclenche   #
+  #    le scan Trivy intégré de Harbor (alimente le dashboard CVE).        #
+  # --------------------------------------------------------------------- #
+  push-harbor:
+    name: Push Harbor (self-hosted)
+    needs: build-scan-sign
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, harbor]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Login GHCR (lecture)
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Login Harbor
+        run: echo "${{ secrets.HARBOR_PASSWORD }}" | docker login ${{ vars.HARBOR_HOST }} -u admin --password-stdin
+
+      - name: Tirer (GHCR) → pousser (Harbor)
+        run: |
+          SRC="${{ needs.build-scan-sign.outputs.image_ref }}"
+          DST="${{ vars.HARBOR_HOST }}/library/harbor-demo-app:${GITHUB_SHA::12}"
+          docker pull "$SRC"
+          docker tag "$SRC" "$DST"
+          docker push "$DST"
+          echo "Image poussée dans Harbor : $DST"
+
+      - name: Déclencher le scan CVE Harbor
+        run: |
+          curl -sSk -u "admin:${{ secrets.HARBOR_PASSWORD }}" -X POST \
+            "http://${{ vars.HARBOR_HOST }}/api/v2.0/projects/library/repositories/harbor-demo-app/artifacts/${GITHUB_SHA::12}/scan" \
+            -H "Content-Type: application/json" || true
+          echo "Scan Harbor déclenché."
