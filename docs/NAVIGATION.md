@@ -105,15 +105,22 @@ Ouvre `.github/workflows/ci.yml`. Les **4 jobs**, dans l'ordre :
 3. `build-scan-sign` : build → **Trivy `--exit-code 1`** → **ZAP** → **Cosign sign+verify** → push GHCR.
 4. `push-harbor` : runner **self-hosted** → push dans Harbor + déclenche le scan.
 
+> **Important (déclenchement)** : un simple `git push` rejoue les jobs `lint`,
+> `sast` et `build-scan-sign` (runners hébergés → toujours verts). Le job
+> `push-harbor` cible le Harbor **local**, donc il se déclenche **à la demande**
+> (`workflow_dispatch`), avec le cluster et le runner self-hosted en ligne.
+
 **Voir / déclencher depuis le terminal** (avec `gh`) :
 ```bash
 gh run list --repo KaTaKuRi-31/harbor-devsecops          # historique des exécutions
 gh run view --repo KaTaKuRi-31/harbor-devsecops <id>     # détail d'un run
-gh workflow run ci.yml --repo KaTaKuRi-31/harbor-devsecops  # relancer la pipeline
+# Rejouer TOUTE la chaîne, y compris le push vers Harbor (runner en ligne requis) :
+gh workflow run ci.yml --repo KaTaKuRi-31/harbor-devsecops
 ```
-**Manipulation type — « déclenche la pipeline »** : modifier un fichier, `git commit`,
-`git push` → l'onglet **Actions** du dépôt montre les jobs passer au vert.
-**À dire** : « Chaque push rejoue toute la chaîne ; si Trivy trouve une CVE
+**Manipulation type — « déclenche la pipeline »** : soit `git commit` + `git push`
+(chaîne sécurisée jusqu'à la signature), soit le bouton **« Run workflow »** de
+l'onglet Actions (= `workflow_dispatch`) pour inclure le push Harbor.
+**À dire** : « Chaque exécution rejoue toute la chaîne ; si Trivy trouve une CVE
 critique corrigeable, le job sort en `exit-code 1` et **bloque** la livraison. »
 
 ---
