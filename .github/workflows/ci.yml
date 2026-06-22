@@ -167,10 +167,10 @@ jobs:
         shell: powershell
     steps:
       - name: Login GHCR (lecture)
-        run: '"${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin'
+        run: docker login ghcr.io -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
 
       - name: Login Harbor
-        run: '"${{ secrets.HARBOR_PASSWORD }}" | docker login ${{ vars.HARBOR_HOST }} -u admin --password-stdin'
+        run: docker login ${{ vars.HARBOR_HOST }} -u admin -p ${{ secrets.HARBOR_PASSWORD }}
 
       - name: Tirer (GHCR) -> pousser (Harbor)
         run: |
