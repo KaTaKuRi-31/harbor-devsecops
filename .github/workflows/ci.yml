@@ -8,6 +8,10 @@ name: CI DevSecOps — Harbor
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'scripts/**'
   pull_request:
   workflow_dispatch:
 
@@ -160,7 +164,9 @@ jobs:
   push-harbor:
     name: Push Harbor (self-hosted)
     needs: build-scan-sign
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    # Déclenché à la demande (workflow_dispatch) : ce job cible le Harbor interne
+    # via le runner self-hosted, qui n'est en ligne que pendant les démos.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: [self-hosted, harbor]
     defaults:
       run:
