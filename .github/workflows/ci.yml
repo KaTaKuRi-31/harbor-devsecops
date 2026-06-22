@@ -102,17 +102,24 @@ jobs:
           provenance: false
 
       - name: CVE — Trivy (HIGH/CRITICAL, bloquant)
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: ${{ steps.meta.outputs.image }}@${{ steps.push.outputs.digest }}
-          format: table
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          vuln-type: os,library
-          exit-code: '1'           # BLOQUANT
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          docker run --rm -e TRIVY_USERNAME -e TRIVY_PASSWORD \
+            aquasec/trivy:latest image \
+            --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+            --exit-code 1 --no-progress \
+            ${{ steps.meta.outputs.image }}@${{ steps.push.outputs.digest }}
 
       - name: DAST — démarrer l'application
-        run: docker run -d --name demo --network host ${{ steps.meta.outputs.image }}@${{ steps.push.outputs.digest }}
+        run: |
+          docker run -d --name demo --network host ${{ steps.meta.outputs.image }}@${{ steps.push.outputs.digest }}
+          echo "Attente du démarrage de l'application…"
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8080/healthz >/dev/null; then echo "App prête."; break; fi
+            sleep 2
+          done
 
       - name: DAST — ZAP baseline
         run: |
