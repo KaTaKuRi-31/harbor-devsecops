@@ -1,0 +1,82 @@
+# Valeurs Harbor — exposition NodePort en HTTP (poste local k3d),
+# scanner Trivy intégré activé, métriques + ServiceMonitor activés.
+
+expose:
+  type: nodePort
+  tls:
+    enabled: false
+  nodePort:
+    name: harbor
+    ports:
+      http:
+        port: 80
+        nodePort: ${http_node_port}
+
+# URL externe vue par les clients (docker login / push) et l'UI.
+externalURL: ${external_url}
+# harborAdminPassword injecté par Terraform (set_sensitive).
+
+persistence:
+  enabled: true
+  persistentVolumeClaim:
+    registry:
+      size: 5Gi
+    jobservice:
+      jobLog:
+        size: 1Gi
+    database:
+      size: 1Gi
+    redis:
+      size: 1Gi
+    trivy:
+      size: 5Gi
+
+# Scanner de vulnérabilités intégré (source des données CVE du dashboard).
+trivy:
+  enabled: true
+
+# Exposition des métriques Prometheus + création du ServiceMonitor.
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+
+# Empreinte mémoire réduite pour un poste local.
+core:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+registry:
+  registry:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+  controller:
+    resources:
+      requests:
+        cpu: 20m
+        memory: 64Mi
+jobservice:
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+database:
+  internal:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+redis:
+  internal:
+    resources:
+      requests:
+        cpu: 20m
+        memory: 32Mi
+portal:
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi

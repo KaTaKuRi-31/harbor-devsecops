@@ -1,0 +1,65 @@
+# Valeurs kube-prometheus-stack — allégées pour un poste local (k3d).
+# Alertmanager désactivé ; Prometheus sélectionne TOUS les ServiceMonitor
+# (y compris celui de Harbor) ; Grafana charge les dashboards via sidecar.
+
+alertmanager:
+  enabled: false
+
+prometheus:
+  service:
+    type: NodePort
+    nodePort: ${prometheus_node_port}
+  prometheusSpec:
+    # Sélectionner les ServiceMonitor/PodMonitor de tous les namespaces,
+    # sans exiger le label "release" (indispensable pour Harbor).
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    retention: 6h
+    resources:
+      requests:
+        cpu: 100m
+        memory: 400Mi
+      limits:
+        memory: 1Gi
+
+grafana:
+  service:
+    type: NodePort
+    nodePort: ${grafana_node_port}
+  # Mot de passe admin injecté par Terraform (set_sensitive).
+  defaultDashboardsTimezone: Europe/Paris
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: ALL
+    datasources:
+      enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
+# Composants d'infra cluster : on garde l'essentiel, allégé.
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+
+# CRD/exporters du control-plane non pertinents sous k3d managé.
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+kubeEtcd:
+  enabled: false
