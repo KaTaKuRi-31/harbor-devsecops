@@ -17,9 +17,6 @@ permissions:
   id-token: write       # signature keyless Cosign (OIDC)
   security-events: write
 
-env:
-  GHCR_IMAGE: ghcr.io/${{ github.repository }}/harbor-demo-app
-
 jobs:
   # ----------------------------------------------------------------- #
   # 1. LINT — hadolint (Dockerfile) + tflint + checkov (IaC Terraform) #
@@ -72,18 +69,18 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       image_ref: ${{ steps.meta.outputs.image_ref }}
-      digest: ${{ steps.push.outputs.digest }}
+      digest: ${{ steps.dig.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Image en minuscules (contrainte GHCR)
+      - name: Variables image (minuscules pour GHCR)
         id: meta
         run: |
           img="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')/harbor-demo-app"
-          echo "image=$img" >> "$GITHUB_OUTPUT"
-          echo "image_ref=$img:${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
-
-      - uses: docker/setup-buildx-action@v3
+          sha12="${GITHUB_SHA::12}"
+          echo "image=$img"        >> "$GITHUB_OUTPUT"
+          echo "sha12=$sha12"       >> "$GITHUB_OUTPUT"
+          echo "image_ref=$img:$sha12" >> "$GITHUB_OUTPUT"
 
       - name: Login GHCR
         uses: docker/login-action@v3
@@ -92,29 +89,24 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build + push (GHCR)
-        id: push
-        uses: docker/build-push-action@v6
-        with:
-          context: app
-          push: true
-          tags: ${{ steps.meta.outputs.image }}:${{ github.sha }},${{ steps.meta.outputs.image }}:latest
-          provenance: false
+      - name: Build de l'image (local)
+        run: |
+          docker build \
+            -t "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha12 }}" \
+            -t "${{ steps.meta.outputs.image }}:latest" \
+            app
 
       - name: CVE — Trivy (HIGH/CRITICAL, bloquant)
-        env:
-          TRIVY_USERNAME: ${{ github.actor }}
-          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          docker run --rm -e TRIVY_USERNAME -e TRIVY_PASSWORD \
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
             aquasec/trivy:latest image \
             --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
             --exit-code 1 --no-progress \
-            ${{ steps.meta.outputs.image }}@${{ steps.push.outputs.digest }}
+            "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha12 }}"
 
       - name: DAST — démarrer l'application
         run: |
-          docker run -d --name demo --network host ${{ steps.meta.outputs.image }}@${{ steps.push.outputs.digest }}
+          docker run -d --name demo --network host "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha12 }}"
           echo "Attente du démarrage de l'application…"
           for i in $(seq 1 30); do
             if curl -sf http://127.0.0.1:8080/healthz >/dev/null; then echo "App prête."; break; fi
@@ -136,15 +128,27 @@ jobs:
           name: zap-baseline-report
           path: zap/
 
+      - name: Publication GHCR (push)
+        run: |
+          docker push "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha12 }}"
+          docker push "${{ steps.meta.outputs.image }}:latest"
+
+      - name: Récupération du digest
+        id: dig
+        run: |
+          d=$(docker inspect --format='{{index .RepoDigests 0}}' "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.sha12 }}" | cut -d@ -f2)
+          echo "digest=$d" >> "$GITHUB_OUTPUT"
+          echo "Digest publié : $d"
+
       - name: Cosign — installation
         uses: sigstore/cosign-installer@v3
 
       - name: Cosign — signature keyless (OIDC)
-        run: cosign sign --yes ${{ steps.meta.outputs.image }}@${{ steps.push.outputs.digest }}
+        run: cosign sign --yes "${{ steps.meta.outputs.image }}@${{ steps.dig.outputs.digest }}"
 
       - name: Cosign — vérification de la signature
         run: |
-          cosign verify ${{ steps.meta.outputs.image }}@${{ steps.push.outputs.digest }} \
+          cosign verify "${{ steps.meta.outputs.image }}@${{ steps.dig.outputs.digest }}" \
             --certificate-identity-regexp "https://github.com/${{ github.repository }}/.*" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
 
@@ -171,7 +175,8 @@ jobs:
       - name: Tirer (GHCR) → pousser (Harbor)
         run: |
           SRC="${{ needs.build-scan-sign.outputs.image_ref }}"
-          DST="${{ vars.HARBOR_HOST }}/library/harbor-demo-app:${GITHUB_SHA::12}"
+          TAG="${GITHUB_SHA::12}"
+          DST="${{ vars.HARBOR_HOST }}/library/harbor-demo-app:${TAG}"
           docker pull "$SRC"
           docker tag "$SRC" "$DST"
           docker push "$DST"
@@ -179,7 +184,8 @@ jobs:
 
       - name: Déclencher le scan CVE Harbor
         run: |
-          curl -sSk -u "admin:${{ secrets.HARBOR_PASSWORD }}" -X POST \
-            "http://${{ vars.HARBOR_HOST }}/api/v2.0/projects/library/repositories/harbor-demo-app/artifacts/${GITHUB_SHA::12}/scan" \
+          TAG="${GITHUB_SHA::12}"
+          curl -sS -u "admin:${{ secrets.HARBOR_PASSWORD }}" -X POST \
+            "http://${{ vars.HARBOR_HOST }}/api/v2.0/projects/library/repositories/harbor-demo-app/artifacts/${TAG}/scan" \
             -H "Content-Type: application/json" || true
-          echo "Scan Harbor déclenché."
+          echo "Scan Harbor déclenché pour le tag ${TAG}."
