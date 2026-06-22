@@ -1,0 +1,60 @@
+---
+config:
+  theme: neutral
+  themeVariables:
+    fontFamily: "Segoe UI, Arial"
+    fontSize: "14px"
+  flowchart:
+    curve: linear
+    nodeSpacing: 40
+    rankSpacing: 55
+---
+flowchart TB
+  dev(["Développeur"])
+
+  subgraph GH["GitHub"]
+    repo["Dépôt<br/>harbor-devsecops"]
+    subgraph HOSTED["GitHub Actions — runners hébergés"]
+      direction TB
+      lint["Lint<br/>hadolint · tflint · checkov"]
+      sast["SAST<br/>Semgrep"]
+      build["Build image"]
+      cve["CVE — Trivy<br/><i>exit-code 1 (bloquant)</i>"]
+      dast["DAST — ZAP baseline"]
+      sign["Signature — Cosign<br/><i>keyless OIDC</i>"]
+      lint --> sast --> build --> cve --> dast --> sign
+    end
+    ghcr[("GHCR<br/>image signée")]
+    sign --> ghcr
+  end
+
+  subgraph LOCAL["Poste local — Docker Desktop / k3d (k3s)"]
+    runner["Runner self-hosted<br/><i>label: harbor</i>"]
+    subgraph HARBOR["Harbor (déployé par Terraform/Helm)"]
+      direction TB
+      hcore["core · portal · registry"]
+      htrivy["scanner Trivy<br/><i>scan CVE</i>"]
+      hexp["exporter Harbor<br/>+ exporter CVE"]
+    end
+    subgraph OBS["Observabilité (Terraform/Helm)"]
+      direction TB
+      prom["Prometheus"]
+      graf["Grafana<br/><i>dashboard CVE & registre</i>"]
+    end
+  end
+
+  dev -- "git push" --> repo
+  repo --> HOSTED
+  ghcr -- "pull image signée" --> runner
+  runner -- "push" --> hcore
+  hcore --> htrivy
+  hexp -- "ServiceMonitor /metrics" --> prom
+  prom --> graf
+
+  style GH fill:#eef5ff,stroke:#4a78b5
+  style HOSTED fill:#f4f9ff,stroke:#7aa7d6
+  style LOCAL fill:#eefbef,stroke:#4caf50
+  style HARBOR fill:#fff7e6,stroke:#c99a2e
+  style OBS fill:#f6f0ff,stroke:#8a63d2
+  style cve fill:#ffe9e9,stroke:#d9534f
+  style sign fill:#e9ffe9,stroke:#4caf50

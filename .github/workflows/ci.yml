@@ -164,28 +164,27 @@ jobs:
     runs-on: [self-hosted, harbor]
     defaults:
       run:
-        shell: bash
+        shell: powershell
     steps:
       - name: Login GHCR (lecture)
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+        run: '"${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin'
 
       - name: Login Harbor
-        run: echo "${{ secrets.HARBOR_PASSWORD }}" | docker login ${{ vars.HARBOR_HOST }} -u admin --password-stdin
+        run: '"${{ secrets.HARBOR_PASSWORD }}" | docker login ${{ vars.HARBOR_HOST }} -u admin --password-stdin'
 
-      - name: Tirer (GHCR) → pousser (Harbor)
+      - name: Tirer (GHCR) -> pousser (Harbor)
         run: |
-          SRC="${{ needs.build-scan-sign.outputs.image_ref }}"
-          TAG="${GITHUB_SHA::12}"
-          DST="${{ vars.HARBOR_HOST }}/library/harbor-demo-app:${TAG}"
-          docker pull "$SRC"
-          docker tag "$SRC" "$DST"
-          docker push "$DST"
-          echo "Image poussée dans Harbor : $DST"
+          $src = "${{ needs.build-scan-sign.outputs.image_ref }}"
+          $tag = "${{ github.sha }}".Substring(0,12)
+          $dst = "${{ vars.HARBOR_HOST }}/library/harbor-demo-app:$tag"
+          docker pull $src
+          docker tag $src $dst
+          docker push $dst
+          Write-Output "Image poussee dans Harbor : $dst"
 
       - name: Déclencher le scan CVE Harbor
         run: |
-          TAG="${GITHUB_SHA::12}"
-          curl -sS -u "admin:${{ secrets.HARBOR_PASSWORD }}" -X POST \
-            "http://${{ vars.HARBOR_HOST }}/api/v2.0/projects/library/repositories/harbor-demo-app/artifacts/${TAG}/scan" \
-            -H "Content-Type: application/json" || true
-          echo "Scan Harbor déclenché pour le tag ${TAG}."
+          $tag = "${{ github.sha }}".Substring(0,12)
+          $url = "http://${{ vars.HARBOR_HOST }}/api/v2.0/projects/library/repositories/harbor-demo-app/artifacts/$tag/scan"
+          curl.exe -sS -u "admin:${{ secrets.HARBOR_PASSWORD }}" -X POST $url -H "Content-Type: application/json"
+          Write-Output "Scan Harbor declenche pour le tag $tag."
